@@ -4,12 +4,14 @@ from datetime import datetime
 import pytz
 
 # --- CONFIGURATION RENDER & RESEAU ---
+# Utilisation du port 10000 par défaut pour Render
 PORT = int(os.environ.get("PORT", 10000))
 MAD_TZ = pytz.timezone('Indian/Antananarivo')
 
 # --- CONFIGURATION VVIP ---
 TOKEN = "8599110423:AAGNHybZmy16KLBWu7nn7kl-IxdqRJ95TO0"
-CHAT_ID = "-1005259418589" # ID Corrigé avec préfixe -100
+# CORRECTION CRITIQUE : Format entier sans guillemets pour l'ID
+CHAT_ID = -1005259418589 
 FINNHUB_TOKEN = "d6og8phr01qnu98huumgd6og8phr01qnu98huun0"
 MARKETS = ["frxXAUUSD", "R_10", "R_25", "R_50", "R_75", "R_100", "B_300", "B_500", "B_1000", "C_300", "C_500", "C_1000"]
 
@@ -29,8 +31,9 @@ def add_log(msg):
 
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}
     try:
-        r = requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
+        r = requests.post(url, json=payload, timeout=10)
         res = r.json()
         if res.get("ok"):
             add_log("✅ Telegram: Message envoyé.")
@@ -71,7 +74,6 @@ def run_smc_logic(candles, symbol):
     elif s_h > ext_h: st.session_state.prepped[symbol] = "SELL"
 
     setup = None
-    # LOGIQUE : TP1 à 50% de la distance vers la liquidité finale
     if st.session_state.prepped.get(symbol) == "BUY" and max(h[-3:-1]) > s_h and curr_p <= s_l + ((s_h - s_l) * 0.30):
         sl = s_l - abs(s_l * 0.0001)
         tp2 = ext_h
@@ -111,9 +113,9 @@ for log in reversed(st.session_state.logs): st.sidebar.write(log)
 
 if st.button("🚀 LANCER LE TERMINAL v10.5 Elite", disabled=st.session_state.running):
     st.session_state.running = True
-    send_telegram("🚀 **TERMINAL Mc ANTHONIO VVIP EN LIGNE**\n\n✅ Stratégie : Sniper Elite (30%)\n✅ Gestion : BE au TP1 (50% Liquidité)\n✅ Actifs : Gold + Synthétiques")
+    send_telegram("🚀 **TERMINAL Mc ANTHONIO VVIP EN LIGNE**\n\n✅ Stratégie : Sniper 30% / SMC\n✅ Gestion : BE au TP1 (50% Liquidité)\n🛡️ Admin : RAKOTOMANGA M.A.")
     threading.Thread(target=start_socket, daemon=True).start()
-    st.success("Moteur Elite activé. Vérifiez votre groupe Telegram !")
+    st.success("Moteur Elite activé. Surveillez votre groupe Telegram !")
 
 st.subheader("🎯 Flux de Signaux")
 for s in reversed(st.session_state.signals):
