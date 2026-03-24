@@ -12,9 +12,9 @@ FINNHUB_TOKEN = "d6og8phr01qnu98huumgd6og8phr01qnu98huun0"
 MARKETS = ["frxXAUUSD", "R_10", "R_25", "R_50", "R_75", "R_100", "B_300", "B_500", "B_1000", "C_300", "C_500", "C_1000"]
 
 st.set_page_config(page_title="Mc ANTHONIO VVIP", layout="wide")
-st.title("🏛️ Mc ANTHONIO VVIP - Terminal v10.6 Elite")
+st.title("🏛️ Mc ANTHONIO VVIP - Terminal v10.7 Elite")
 
-# --- INITIALISATION DES VARIABLES D'ÉTAT ---
+# --- INITIALISATION DES VARIABLES ---
 if "signals" not in st.session_state: st.session_state.signals = []
 if "signals_count" not in st.session_state: st.session_state.signals_count = 0
 if "scanned_candles" not in st.session_state: st.session_state.scanned_candles = 0
@@ -24,15 +24,16 @@ if "logs" not in st.session_state: st.session_state.logs = []
 
 def add_log(msg):
     now = datetime.now(MAD_TZ).strftime('%H:%M:%S')
-    st.session_state.logs.append(f"[{now}] {msg}")
+    new_entry = f"[{now}] {msg}"
+    st.session_state.logs.append(new_entry)
+    print(f"DEBUG: {new_entry}") # Visible dans les logs Render
 
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}
     try:
-        r = requests.post(url, json=payload, timeout=15)
-        if r.json().get("ok"): add_log("✅ Message Telegram envoyé.")
-    except Exception as e: add_log(f"⚠️ Erreur: {e}")
+        requests.post(url, json=payload, timeout=15)
+    except: pass
 
 # --- GESTIONNAIRE DE MESSAGES (6H & 21H) ---
 def daily_scheduler():
@@ -41,15 +42,17 @@ def daily_scheduler():
         now = datetime.now(MAD_TZ)
         current_time = now.strftime("%H:%M")
         
+        # MESSAGE DU MATIN (06:00)
         if current_time == "06:00" and not sent_6h:
-            msg = "🌅 **PRÉPARATION & DISCIPLINE VVIP**\n\nBonjour l'équipe ! Le terminal est actif.\n\n💡 *Rappel de Discipline :*\nAttendez le Sniper 30%. Ne forcez aucun trade. Le succès appartient aux patients.\n\n🛡️ **Admin : RAKOTOMANGA M.A.**"
+            msg = "🌅 **PRÉPARATION & DISCIPLINE VVIP**\n\nBonjour l'équipe ! Le terminal est actif.\n\n💡 *Rappel :* Attendez le Sniper 30%. Ne forcez aucun trade.\n\n🛡️ **Admin : Mc ANTHONIO**"
             send_telegram(msg)
             st.session_state.signals_count = 0
             sent_6h, sent_21h = True, False
         
+        # MESSAGE DU SOIR (21:00)
         if current_time == "21:00" and not sent_21h:
             status = f"✅ {st.session_state.signals_count} signaux validés." if st.session_state.signals_count > 0 else "🛡️ Aucun signal (Marché protégé)."
-            msg = f"🌃 **RAPPORT DU SOIR VVIP**\n\n📊 **Activité :**\n- Bougies scannés : {st.session_state.scanned_candles}\n- Résultat : {status}\n\n📖 *Discipline :*\nSavoir ne pas trader est aussi une victoire. Reposez-vous.\n\n🛡️ **Admin : RAKOTOMANGA M.A.**"
+            msg = f"🌃 **RAPPORT DU SOIR VVIP**\n\n📊 **Activité :**\n- Bougies scannées : {st.session_state.scanned_candles}\n- Résultat : {status}\n\n📖 *Discipline :* Savoir ne pas trader est aussi une victoire.\n\n🛡️ **Admin : Mc ANTHONIO**"
             send_telegram(msg)
             sent_21h, sent_6h = True, False
         time.sleep(30)
@@ -61,36 +64,31 @@ def run_smc_logic(candles, symbol):
     h, l, c = [float(x['high']) for x in candles], [float(x['low']) for x in candles], [float(x['close']) for x in candles]
     curr_p = c[-1]
     
-    # Break-Even
+    # Gestion Break-Even
     if symbol in st.session_state.active_trades:
         t = st.session_state.active_trades[symbol]
         if (t['type'] == "BUY" and curr_p >= t['tp1']) or (t['type'] == "SELL" and curr_p <= t['tp1']):
             send_telegram(f"🛡️ **VVIP UPDATE : {symbol}**\n✅ TP1 ATTEINT ! Sécurisez au BE.")
             del st.session_state.active_trades[symbol]
 
-    # Analyse
     ext_h, ext_l = max(h[-70:-15]), min(l[-70:-15])
     s_h, s_l = max(h[-10:-3]), min(l[-10:-3])
 
     setup = None
-    # Sniper 30% Buy
     if s_l < ext_l and max(h[-3:-1]) > s_h and curr_p <= s_l + ((s_h - s_l) * 0.30):
-        tp2 = ext_h
-        tp1 = curr_p + ((tp2 - curr_p) * 0.50)
+        tp2, tp1 = ext_h, curr_p + ((ext_h - curr_p) * 0.50)
         setup = f"🟢 **BUY {symbol}**\n📍 Entry : `{curr_p}`\n🎯 TP1 : `{round(tp1, 2)}` | TP2 : `{round(tp2, 2)}`"
         st.session_state.active_trades[symbol] = {'type': "BUY", 'entry': curr_p, 'tp1': tp1}
 
-    # Sniper 30% Sell
     elif s_h > ext_h and min(l[-3:-1]) < s_l and curr_p >= s_h - ((s_h - s_l) * 0.30):
-        tp2 = ext_l
-        tp1 = curr_p - ((curr_p - tp2) * 0.50)
+        tp2, tp1 = ext_l, curr_p - ((curr_p - ext_l) * 0.50)
         setup = f"🔴 **SELL {symbol}**\n📍 Entry : `{curr_p}`\n🎯 TP1 : `{round(tp1, 2)}` | TP2 : `{round(tp2, 2)}`"
         st.session_state.active_trades[symbol] = {'type': "SELL", 'entry': curr_p, 'tp1': tp1}
 
     if setup and setup not in [s.split('|')[0] for s in st.session_state.signals]:
-        st.session_state.signals.append(f"{setup}|{datetime.now(MAD_TZ)}")
+        st.session_state.signals.append(f"{setup}|{datetime.now(MAD_TZ).strftime('%H:%M:%S')}")
         st.session_state.signals_count += 1
-        send_telegram(f"🏛️ **Mc ANTHONIO VVIP SIGNAL**\n\n{setup}\n\n🛡️ Admin : RAKOTOMANGA M.A.")
+        send_telegram(f"🏛️ **Mc ANTHONIO VVIP SIGNAL**\n\n{setup}\n\n🛡️ Admin : Mc ANTHONIO")
 
 def start_socket():
     while True:
@@ -99,20 +97,26 @@ def start_socket():
                 on_open=lambda ws: [ws.send(json.dumps({"ticks_history": s, "subscribe": 1, "count": 100, "granularity": 300, "style": "candles"})) for s in MARKETS],
                 on_message=lambda ws, m: run_smc_logic(json.loads(m)['candles'], json.loads(m)['echo_req']['ticks_history']) if 'candles' in json.loads(m) else None)
             ws.run_forever()
-        except: pass
-        time.sleep(5)
+        except: time.sleep(5)
 
-# --- INTERFACE ---
+# --- INTERFACE & AUTO-START ---
 st.sidebar.subheader("📜 Logs Système")
 for log in reversed(st.session_state.logs): st.sidebar.write(log)
 
-if st.button("🚀 LANCER LE TERMINAL v10.6 Elite"):
+# Lancement automatique dès le premier chargement (UptimeRobot)
+if not st.session_state.running:
     st.session_state.running = True
-    send_telegram("🚀 **TERMINAL Mc ANTHONIO VVIP ACTIF**\n\n✅ Analyse SMC Sniper\n✅ Rapport 6h/21h\n🛡️ Admin : RAKOTOMANGA M.A.")
+    add_log("🚀 Auto-Démarrage du Terminal v10.7...")
     threading.Thread(target=start_socket, daemon=True).start()
     threading.Thread(target=daily_scheduler, daemon=True).start()
-    st.success("Moteur et Horloge activés !")
+    send_telegram("🚀 **TERMINAL Mc ANTHONIO VVIP EN LIGNE**\n\n✅ Moteurs activés automatiquement.\n🛡️ Admin : Mc ANTHONIO")
 
-st.subheader("🎯 Flux de Signaux")
-for s in reversed(st.session_state.signals):
-    st.markdown(s.split('|')[0]); st.caption(f"Validé à : {s.split('|')[1]}")
+st.success("✅ Le Terminal tourne en arrière-plan. Vérifie ton Telegram.")
+
+st.subheader("🎯 Flux de Signaux Journaliers")
+if not st.session_state.signals:
+    st.info("Scan en cours sur Gold & 11 Indices... En attente d'une opportunité Sniper.")
+else:
+    for s in reversed(st.session_state.signals):
+        st.markdown(s.split('|')[0])
+        st.caption(f"Signal validé à : {s.split('|')[1]} (Madagascar)")
