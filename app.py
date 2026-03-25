@@ -6,11 +6,11 @@ import pytz
 MAD_TZ = pytz.timezone('Indian/Antananarivo')
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
+# Actifs surveillés (XAU/USD + Synthétiques)
 MARKETS = ["frxXAUUSD", "R_10", "R_25", "R_50", "R_75", "R_100", "B_300", "B_500", "B_1000", "C_300", "C_500", "C_1000"]
 
 MOTIVATIONS = [
     "Le succès n'est pas final, l'échec n'est pas fatal : c'est le courage de continuer qui compte.",
-    "Le trading ne consiste pas à prédire l'avenir, mais à avoir un système qui gère les probabilités.",
     "Le marché est un miroir. Il vous donne ce que vous méritez par votre discipline.",
     "N'ayez pas peur de rater un trade, ayez peur de ne pas respecter votre plan.",
     "Le but d'un trader n'est pas de faire de l'argent, mais de faire de bons trades."
@@ -27,7 +27,7 @@ DISCIPLINE_RULES = [
 class VVIPBot:
     def __init__(self):
         self.scanned = 0
-        self.sent_signals = [] # Mémoire des signaux envoyés
+        self.sent_signals = [] 
         self.last_report_hour = -1
         self.day_started = False
         self.day_ended = False
@@ -56,34 +56,41 @@ def fetch_and_analyze(symbol):
             setup = None
             rec_l, rec_h = min(l[-15:]), max(h[-15:])
 
-            if rec_l < ext_l and curr_p > max(h[-12:-2]): # BUY
+            # --- STRATÉGIE SWEEP + BOS + PULLBACK 30% ---
+            
+            # Cas BUY (Achat)
+            if rec_l < ext_l and curr_p > max(h[-12:-2]): 
+                sweep_low = rec_l
+                bos_high = curr_p
+                # Entrée au 30% du retracement de la jambe de cassure
+                entry_price = bos_high - (abs(bos_high - sweep_low) * 0.30)
                 tp2 = ext_h
-                tp1 = curr_p + (abs(tp2 - curr_p) * 0.5)
-                setup = f"🟢 **BUY SNIPER** {symbol}\n📍 Entrée : `{curr_p}`\n🛡️ **SL :** `{round(rec_l, 2)}` \n🏆 **TP1 :** `{round(tp1, 2)}` | **TP2 :** `{round(tp2, 2)}`"
+                tp1 = entry_price + (abs(tp2 - entry_price) * 0.5)
+                
+                setup = f"🟢 **BUY SNIPER (Entry 30%)** {symbol}\n📍 Ordre Limite : `{round(entry_price, 2)}`\n🛡️ **SL :** `{round(sweep_low, 2)}` \n🏆 **TP1 :** `{round(tp1, 2)}` | **TP2 :** `{round(tp2, 2)}`"
 
-            elif rec_h > ext_h and curr_p < min(l[-12:-2]): # SELL
+            # Cas SELL (Vente)
+            elif rec_h > ext_h and curr_p < min(l[-12:-2]):
+                sweep_high = rec_h
+                bos_low = curr_p
+                # Entrée au 30% du retracement
+                entry_price = bos_low + (abs(sweep_high - bos_low) * 0.30)
                 tp2 = ext_l
-                tp1 = curr_p - (abs(curr_p - tp2) * 0.5)
-                setup = f"🔴 **SELL SNIPER** {symbol}\n📍 Entrée : `{curr_p}`\n🛡️ **SL :** `{round(rec_h, 2)}` \n🏆 **TP1 :** `{round(tp1, 2)}` | **TP2 :** `{round(tp2, 2)}`"
+                tp1 = entry_price - (abs(entry_price - tp2) * 0.5)
+                
+                setup = f"🔴 **SELL SNIPER (Entry 30%)** {symbol}\n📍 Ordre Limite : `{round(entry_price, 2)}`\n🛡️ **SL :** `{round(sweep_high, 2)}` \n🏆 **TP1 :** `{round(tp1, 2)}` | **TP2 :** `{round(tp2, 2)}`"
 
             if setup:
-                # Création d'un ID unique (Actif + Prix arrondi)
                 sig_id = f"{symbol}_{round(curr_p, 2)}"
-                
-                # VERIFICATION ANTI-DOUBLON
                 if sig_id not in bot.sent_signals:
                     bot.sent_signals.append(sig_id)
                     send_tg(f"🏛️ **VVIP Signal by Mc Anthonio**\n\n{setup}\n👤 @McAnthonio")
-                    
-                    # Garder seulement les 50 derniers pour la mémoire RAM
-                    if len(bot.sent_signals) > 50:
-                        bot.sent_signals.pop(0)
+                    if len(bot.sent_signals) > 50: bot.sent_signals.pop(0)
             bot.scanned += 1
     except: pass
 
 def run_bot():
-    # Message de bienvenue UNIQUE au lancement réel
-    send_tg("🚀 **VVIP v13.1 Master Online.**\nSécurité anti-doublon activée.")
+    send_tg("🚀 **VVIP v13.2 Sniper Pro Online.**\nStratégie Sweep + BOS + 30% Retracement active.")
     
     while True:
         try:
