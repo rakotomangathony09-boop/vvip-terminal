@@ -1,162 +1,157 @@
-import json, requests, threading, time, os, websocket
-from datetime import datetime
-import pytz
+import json, requests, threading, time, os, websocket, logging
 
-# --- CONFIGURATION ---
-MAD_TZ = pytz.timezone('Indian/Antananarivo')
+# --- LOGGING ---
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
+
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-MARKETS = ["R_10", "R_25", "R_50", "R_75", "R_100",
-           "B_300", "B_500", "B_1000",
-           "C_300", "C_500", "C_1000"]
+MARKETS = ["R_10","R_25","R_50","R_75","R_100",
+           "B_300","B_500","B_1000",
+           "C_300","C_500","C_1000"]
 
-class VVIPBot:
+class Bot:
     def __init__(self):
-        self.scanned = 0
-        self.sent_signals = []
-        self.last_report_hour = -1
-        self.day_started = False
-        self.day_ended = False
+        self.sent = []
 
-bot = VVIPBot()
+bot = Bot()
 
 # --- TELEGRAM ---
 def send_tg(msg):
-    if TOKEN and CHAT_ID:
-        try:
-            url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-            requests.post(url, json={
-                "chat_id": CHAT_ID,
-                "text": msg,
-                "parse_mode": "Markdown"
-            }, timeout=10)
-        except:
-            pass
-
-# --- ANALYSE PRINCIPALE ---
-def fetch_and_analyze(symbol):
     try:
-        ws = websocket.create_connection(
-            "wss://ws.binaryws.com/websockets/v3?app_id=1089",
-            timeout=15
+        requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"},
+            timeout=10
         )
-
-        ws.send(json.dumps({
-            "ticks_history": symbol,
-            "count": 100,
-            "style": "candles",
-            "granularity": 300
-        }))
-
-        res = json.loads(ws.recv())
-        ws.close()
-
-        if 'candles' not in res:
-            return
-
-        c = res['candles']
-
-        h = [float(x['high']) for x in c]
-        l = [float(x['low']) for x in c]
-        cl = [float(x['close']) for x in c]
-
-        curr_p = cl[-1]
-
-        # ===============================
-        # 🔥 STRATÉGIE SMC (TON IMAGE)
-        # ===============================
-
-        # 1. Zones de liquidité
-        major_h = max(h[20:85])
-        major_l = min(l[20:85])
-
-        # 2. Détection sweep (bougie précédente)
-        sweep_sell = h[-2] > major_h and cl[-2] < major_h
-        sweep_buy = l[-2] < major_l and cl[-2] > major_l
-
-        # 3. Structure marché (BOS)
-        last_low = min(l[-10:-2])
-        last_high = max(h[-10:-2])
-
-        # 4. Filtre tendance simple
-        trend_up = cl[-1] > cl[-20]
-        trend_down = cl[-1] < cl[-20]
-
-        setup = None
-
-        # 🔴 SELL confirmé (Sweep + BOS)
-        if sweep_sell and cl[-1] < last_low and trend_down:
-
-            entry = curr_p
-            sl = h[-2]
-            tp_final = major_l
-
-            rr = abs(entry - tp_final)
-            tp1 = entry - rr * 0.5
-
-            setup = (f"🔴 **SMC SELL CONFIRMÉ** {symbol}\n"
-                     f"⚠️ Sweep + BOS validé\n\n"
-                     f"📍 Entry : `{entry}`\n"
-                     f"🛡️ SL : `{round(sl,2)}`\n"
-                     f"🎯 TP1 : `{round(tp1,2)}`\n"
-                     f"💎 TP Final : `{round(tp_final,2)}`")
-
-        # 🟢 BUY confirmé (inverse)
-        elif sweep_buy and cl[-1] > last_high and trend_up:
-
-            entry = curr_p
-            sl = l[-2]
-            tp_final = major_h
-
-            rr = abs(tp_final - entry)
-            tp1 = entry + rr * 0.5
-
-            setup = (f"🟢 **SMC BUY CONFIRMÉ** {symbol}\n"
-                     f"⚠️ Sweep + BOS validé\n\n"
-                     f"📍 Entry : `{entry}`\n"
-                     f"🛡️ SL : `{round(sl,2)}`\n"
-                     f"🎯 TP1 : `{round(tp1,2)}`\n"
-                     f"💎 TP Final : `{round(tp_final,2)}`")
-
-        # --- ENVOI SIGNAL ---
-        if setup:
-            sig_id = f"{symbol}_{round(curr_p, 1)}"
-
-            if sig_id not in bot.sent_signals:
-                bot.sent_signals.append(sig_id)
-
-                send_tg(
-                    f"🏛️ **STRATÉGIE INSTITUTIONNELLE SMC**\n\n"
-                    f"{setup}\n\n"
-                    f"👤 @McAnthonio"
-                )
-
-                if len(bot.sent_signals) > 40:
-                    bot.sent_signals.pop(0)
-
-        bot.scanned += 1
-
     except Exception as e:
-        print(f"Erreur sur {symbol}: {e}")
+        logging.error(f"Telegram error: {e}")
 
-# --- BOUCLE PRINCIPALE ---
-def run_bot():
-    print("🚀 Bot SMC lancé...")
+# --- INDICATEURS ---
+def ema(data, period):
+    k = 2 / (period + 1)
+    ema_val = data[0]
+    for price in data:
+        ema_val = price * k + ema_val * (1 - k)
+    return ema_val
+
+def rsi(closes, period=14):
+    gains, losses = [], []
+    for i in range(1, len(closes)):
+        diff = closes[i] - closes[i-1]
+        gains.append(max(diff, 0))
+        losses.append(abs(min(diff, 0)))
+
+    avg_gain = sum(gains[-period:]) / period
+    avg_loss = sum(losses[-period:]) / period
+
+    if avg_loss == 0:
+        return 100
+
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+# --- FETCH DATA ---
+def get_data(symbol):
+    for _ in range(3):  # retry x3
+        try:
+            ws = websocket.create_connection("wss://ws.binaryws.com/websockets/v3?app_id=1089", timeout=10)
+
+            ws.send(json.dumps({
+                "ticks_history": symbol,
+                "count": 120,
+                "style": "candles",
+                "granularity": 300
+            }))
+
+            res = json.loads(ws.recv())
+            ws.close()
+
+            if 'candles' in res:
+                return res['candles']
+
+        except Exception as e:
+            logging.warning(f"Retry {symbol}: {e}")
+            time.sleep(1)
+
+    return None
+
+# --- STRATEGY ---
+def analyze(symbol):
+    candles = get_data(symbol)
+    if not candles:
+        return
+
+    h = [float(x['high']) for x in candles]
+    l = [float(x['low']) for x in candles]
+    cl = [float(x['close']) for x in candles]
+
+    price = cl[-1]
+
+    # --- SMC ---
+    major_h = max(h[20:100])
+    major_l = min(l[20:100])
+
+    sweep_sell = h[-2] > major_h and cl[-2] < major_h
+    sweep_buy = l[-2] < major_l and cl[-2] > major_l
+
+    last_low = min(l[-12:-2])
+    last_high = max(h[-12:-2])
+
+    # --- FILTERS ---
+    trend = ema(cl[-50:], 50)
+    rsi_val = rsi(cl)
+
+    setup = None
+
+    # SELL
+    if sweep_sell and cl[-1] < last_low and price < trend and rsi_val < 50:
+        entry = price
+        sl = h[-2]
+        tp = major_l
+
+        setup = f"🔴 SELL {symbol}\nEntry: {entry}\nSL: {sl}\nTP: {tp}"
+
+    # BUY
+    elif sweep_buy and cl[-1] > last_high and price > trend and rsi_val > 50:
+        entry = price
+        sl = l[-2]
+        tp = major_h
+
+        setup = f"🟢 BUY {symbol}\nEntry: {entry}\nSL: {sl}\nTP: {tp}"
+
+    if setup:
+        sig = f"{symbol}_{round(price,1)}"
+
+        if sig not in bot.sent:
+            bot.sent.append(sig)
+            send_tg(setup)
+
+            if len(bot.sent) > 50:
+                bot.sent.pop(0)
+
+# --- MAIN LOOP ---
+def run():
+    logging.info("🚀 BOT RUNNING (RENDER MODE)")
 
     while True:
-        threads = []
+        try:
+            threads = []
 
-        for symbol in MARKETS:
-            t = threading.Thread(target=fetch_and_analyze, args=(symbol,))
-            t.start()
-            threads.append(t)
+            for s in MARKETS:
+                t = threading.Thread(target=analyze, args=(s,))
+                t.start()
+                threads.append(t)
 
-        for t in threads:
-            t.join()
+            for t in threads:
+                t.join()
 
-        time.sleep(10)  # scan toutes les 10 secondes
+            time.sleep(10)
+
+        except Exception as e:
+            logging.error(f"Main loop crash: {e}")
+            time.sleep(5)
 
 # --- START ---
 if __name__ == "__main__":
-    run_bot()
+    run()
