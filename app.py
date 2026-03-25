@@ -11,7 +11,7 @@ MARKETS = ["frxXAUUSD", "R_10", "R_25", "R_50", "R_75", "R_100", "B_300", "B_500
 MOTIVATIONS = [
     "Le succès n'est pas final, l'échec n'est pas fatal : c'est le courage de continuer qui compte.",
     "Le trading ne consiste pas à prédire l'avenir, mais à avoir un système qui gère les probabilités.",
-    "Le marché est un miroir. Il ne vous donne pas ce que vous voulez, il vous donne ce que vous méritez par votre discipline.",
+    "Le marché est un miroir. Il vous donne ce que vous méritez par votre discipline.",
     "N'ayez pas peur de rater un trade, ayez peur de ne pas respecter votre plan.",
     "Le but d'un trader n'est pas de faire de l'argent, mais de faire de bons trades."
 ]
@@ -27,7 +27,7 @@ DISCIPLINE_RULES = [
 class VVIPBot:
     def __init__(self):
         self.scanned = 0
-        self.signals = []
+        self.sent_signals = [] # Mémoire des signaux envoyés
         self.last_report_hour = -1
         self.day_started = False
         self.day_ended = False
@@ -67,15 +67,23 @@ def fetch_and_analyze(symbol):
                 setup = f"🔴 **SELL SNIPER** {symbol}\n📍 Entrée : `{curr_p}`\n🛡️ **SL :** `{round(rec_h, 2)}` \n🏆 **TP1 :** `{round(tp1, 2)}` | **TP2 :** `{round(tp2, 2)}`"
 
             if setup:
+                # Création d'un ID unique (Actif + Prix arrondi)
                 sig_id = f"{symbol}_{round(curr_p, 2)}"
-                if sig_id not in bot.signals:
-                    bot.signals.append(sig_id)
+                
+                # VERIFICATION ANTI-DOUBLON
+                if sig_id not in bot.sent_signals:
+                    bot.sent_signals.append(sig_id)
                     send_tg(f"🏛️ **VVIP Signal by Mc Anthonio**\n\n{setup}\n👤 @McAnthonio")
+                    
+                    # Garder seulement les 50 derniers pour la mémoire RAM
+                    if len(bot.sent_signals) > 50:
+                        bot.sent_signals.pop(0)
             bot.scanned += 1
     except: pass
 
 def run_bot():
-    send_tg("🚀 **VVIP v13.0 Elite Mindset Online.**\nLe scanner et le coach de discipline sont prêts.")
+    # Message de bienvenue UNIQUE au lancement réel
+    send_tg("🚀 **VVIP v13.1 Master Online.**\nSécurité anti-doublon activée.")
     
     while True:
         try:
@@ -83,23 +91,23 @@ def run_bot():
             hr = now.hour
 
             if hr == 6 and not bot.day_started:
-                msg = f"☀️ **SESSION OUVERTE**\n\n💡 *Motivation :*\n\"{random.choice(MOTIVATIONS)}\"\n\n🛡️ *Discipline :*\n{random.choice(DISCIPLINE_RULES)}\n\n🚀 Scan en cours..."
+                msg = f"☀️ **SESSION OUVERTE**\n\n💡 *Motivation :*\n\"{random.choice(MOTIVATIONS)}\"\n\n🛡️ *Discipline :*\n{random.choice(DISCIPLINE_RULES)}"
                 send_tg(msg)
                 bot.day_started = True
                 bot.day_ended = False
 
             if hr in [9, 12, 15, 18] and bot.last_report_hour != hr:
-                rapport = f"📊 **RAPPORT ({hr}h)**\n✅ Scans : {bot.scanned}\n📈 Signaux : {len(bot.signals)}"
+                rapport = f"📊 **RAPPORT ({hr}h)**\n✅ Scans : {bot.scanned}\n📈 Signaux : {len(bot.sent_signals)}"
                 send_tg(rapport)
                 bot.last_report_hour = hr
 
             if hr == 21 and not bot.day_ended:
-                msg = f"🌑 **SESSION TERMINÉE**\n\n🏆 *Bilan :*\n🔄 Scans : {bot.scanned}\n📈 Signaux : {len(bot.signals)}\n\nÀ demain 06h00 !"
+                msg = f"🌑 **SESSION TERMINÉE**\n\n🏆 *Bilan :*\n🔄 Scans : {bot.scanned}\n📈 Signaux : {len(bot.sent_signals)}\n\nÀ demain 06h00 !"
                 send_tg(msg)
                 bot.day_ended = True
                 bot.day_started = False
                 bot.scanned = 0
-                bot.signals = []
+                bot.sent_signals = []
 
             if 6 <= hr < 21:
                 for m in MARKETS:
