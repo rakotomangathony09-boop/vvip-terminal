@@ -1,4 +1,4 @@
-git+https://github.com/binary-com/deriv-api-python.git
+deriv-api
 pandas
 pandas_ta
 requests
