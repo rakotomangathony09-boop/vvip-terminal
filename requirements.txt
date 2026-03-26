@@ -1,6 +1,9 @@
-websocket-client
-pyTelegramBotAPI
+deriv-api
+pandas
+pandas_ta
 requests
-schedule
+python-dotenv
 flask
-gunicorn
+pyTelegramBotAPI
+schedule
+websocket-client
