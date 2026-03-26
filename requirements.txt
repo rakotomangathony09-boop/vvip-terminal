@@ -1,4 +1,4 @@
-deriv-api
+deriv-api-v2
 pandas
 pandas_ta
 requests
