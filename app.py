@@ -13,7 +13,7 @@ from datetime import datetime
 from flask import Flask
 from deriv_api import DerivAPI
 
-# --- CONFIGURATION (Variables d'environnement Render) ---
+# --- CONFIGURATION RENDER ---
 DERIV_TOKEN = os.getenv("DERIV_TOKEN")
 TG_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -34,12 +34,11 @@ class SniperSystem:
         self.last_signal_time = {s: 0 for s in self.symbols}
 
     def is_market_open(self, symbol):
-        """Vérifie si le marché est ouvert (Sécurité Week-end pour l'Or)"""
+        """Sécurité Week-end : L'Or ferme du Vendredi soir au Dimanche soir"""
         if "XAU" in symbol:
             now = datetime.utcnow()
-            weekday = now.weekday()  # 4=Vendredi, 5=Samedi, 6=Dimanche
+            weekday = now.weekday()  # 4=Ven, 5=Sam, 6=Dim
             hour = now.hour
-            # Fermeture Vendredi 21h UTC - Réouverture Dimanche 22h UTC
             if (weekday == 4 and hour >= 21) or weekday == 5 or (weekday == 6 and hour < 22):
                 return False
         return True
@@ -58,12 +57,13 @@ class SniperSystem:
         low_zone = df['low'].iloc[-lookback:-1].min()
         high_zone = df['high'].iloc[-lookback:-1].max()
 
-        # LOGIQUE SNIPER SMC (Sweep + Rejection)
+        # SIGNAL ACHAT (BUY)
         if last['low'] < low_zone and wick_percent > 0.55 and rsi < 25:
             self.sweeps_detected += 1
             label = "🏆 GOLD BUY" if "XAU" in symbol else "🚀 SPIKE BUY"
             return {"type": label, "entry": last['close'], "sl": last['low'] - (0.5 if "XAU" in symbol else 1.5)}
 
+        # SIGNAL VENTE (SELL)
         if last['high'] > high_zone and wick_percent > 0.55 and rsi > 75:
             self.sweeps_detected += 1
             label = "🏆 GOLD SELL" if "XAU" in symbol else "📉 SPIKE SELL"
@@ -80,7 +80,7 @@ def send_signal(symbol, setup):
            f"📈 Actif : `{name}`\n"
            f"📍 ENTRÉE : `{setup['entry']:.2f}`\n"
            f"🛡️ STOP LOSS : `{setup['sl']:.2f}`\n\n"
-           f"✅ *Confirmation : Rejection validée*")
+           f"✅ *Confirmation : Sniper Rejection validé*")
     bot_tg.send_message(TG_CHAT_ID, msg, parse_mode="Markdown")
     system.signals_sent += 1
 
@@ -89,10 +89,10 @@ async def deriv_worker():
     await api.authorize(DERIV_TOKEN)
     
     async def subscribe(symbol):
-        while True: # Boucle infinie pour auto-reconnexion
+        while True: # Boucle de reconnexion automatique
             try:
                 if not system.is_market_open(symbol):
-                    await asyncio.sleep(3600) # Attend 1h si marché fermé
+                    await asyncio.sleep(3600) # Attend 1h si le marché est fermé
                     continue
 
                 hist = await api.ticks_history({'ticks_history': symbol, 'count': 150, 'style': 'candles', 'granularity': 60})
@@ -115,12 +115,11 @@ async def deriv_worker():
                     
                     if setup:
                         now = time.time()
-                        if now - system.last_signal_time[symbol] > 300: # Cooldown 5min
+                        if now - system.last_signal_time[symbol] > 300: # Cooldown 5 min
                             send_signal(symbol, setup)
                             system.last_signal_time[symbol] = now
-            except Exception as e:
-                print(f"Erreur sur {symbol}: {e}. Reconnexion dans 10s...")
-                await asyncio.sleep(10)
+            except:
+                await asyncio.sleep(10) # Reconnexion après 10 secondes en cas d'erreur
 
     await asyncio.gather(*(subscribe(s) for s in system.symbols))
 
@@ -129,9 +128,7 @@ def health(): return "VVIP TERMINAL ONLINE", 200
 
 if __name__ == "__main__":
     try:
-        bot_tg.send_message(TG_CHAT_ID, "🚀 **VVIP TERMINAL DÉPLOYÉ**\n*(Gold + Synthétiques)*")
+        bot_tg.send_message(TG_CHAT_ID, "🚀 **VVIP TERMINAL SNIPER DÉPLOYÉ**\n*(Gold + Synthétiques)*")
     except: pass
-    # Lancement du serveur Web pour Render
     Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000))), daemon=True).start()
-    # Lancement du bot Trading
     asyncio.run(deriv_worker())
