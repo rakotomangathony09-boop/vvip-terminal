@@ -34,11 +34,12 @@ class SniperSystem:
         self.last_signal_time = {s: 0 for s in self.symbols}
 
     def is_market_open(self, symbol):
-        """Vérifie si le marché est ouvert (Spécifique à l'Or)"""
+        """Vérifie si le marché est ouvert (Sécurité Week-end pour l'Or)"""
         if "XAU" in symbol:
             now = datetime.utcnow()
             weekday = now.weekday()  # 4=Vendredi, 5=Samedi, 6=Dimanche
             hour = now.hour
+            # Fermeture Vendredi 21h UTC - Réouverture Dimanche 22h UTC
             if (weekday == 4 and hour >= 21) or weekday == 5 or (weekday == 6 and hour < 22):
                 return False
         return True
@@ -57,13 +58,12 @@ class SniperSystem:
         low_zone = df['low'].iloc[-lookback:-1].min()
         high_zone = df['high'].iloc[-lookback:-1].max()
 
-        # LOGIQUE D'ACHAT (BUY)
+        # LOGIQUE SNIPER SMC (Sweep + Rejection)
         if last['low'] < low_zone and wick_percent > 0.55 and rsi < 25:
             self.sweeps_detected += 1
             label = "🏆 GOLD BUY" if "XAU" in symbol else "🚀 SPIKE BUY"
             return {"type": label, "entry": last['close'], "sl": last['low'] - (0.5 if "XAU" in symbol else 1.5)}
 
-        # LOGIQUE DE VENTE (SELL)
         if last['high'] > high_zone and wick_percent > 0.55 and rsi > 75:
             self.sweeps_detected += 1
             label = "🏆 GOLD SELL" if "XAU" in symbol else "📉 SPIKE SELL"
@@ -89,10 +89,10 @@ async def deriv_worker():
     await api.authorize(DERIV_TOKEN)
     
     async def subscribe(symbol):
-        while True:
+        while True: # Boucle infinie pour auto-reconnexion
             try:
                 if not system.is_market_open(symbol):
-                    await asyncio.sleep(3600)
+                    await asyncio.sleep(3600) # Attend 1h si marché fermé
                     continue
 
                 hist = await api.ticks_history({'ticks_history': symbol, 'count': 150, 'style': 'candles', 'granularity': 60})
@@ -100,7 +100,6 @@ async def deriv_worker():
                 sub = await api.subscribe({'ohlc': symbol, 'granularity': 60})
                 
                 async for msg in sub:
-                    if not system.session_active: continue
                     o = msg['ohlc']
                     system.ticks_processed += 1
                     new_c = {'epoch': o['open_time'], 'open': float(o['open']), 'high': float(o['high']), 'low': float(o['low']), 'close': float(o['close'])}
@@ -116,10 +115,11 @@ async def deriv_worker():
                     
                     if setup:
                         now = time.time()
-                        if now - system.last_signal_time[symbol] > 300:
+                        if now - system.last_signal_time[symbol] > 300: # Cooldown 5min
                             send_signal(symbol, setup)
                             system.last_signal_time[symbol] = now
-            except:
+            except Exception as e:
+                print(f"Erreur sur {symbol}: {e}. Reconnexion dans 10s...")
                 await asyncio.sleep(10)
 
     await asyncio.gather(*(subscribe(s) for s in system.symbols))
@@ -131,5 +131,7 @@ if __name__ == "__main__":
     try:
         bot_tg.send_message(TG_CHAT_ID, "🚀 **VVIP TERMINAL DÉPLOYÉ**\n*(Gold + Synthétiques)*")
     except: pass
+    # Lancement du serveur Web pour Render
     Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000))), daemon=True).start()
+    # Lancement du bot Trading
     asyncio.run(deriv_worker())
