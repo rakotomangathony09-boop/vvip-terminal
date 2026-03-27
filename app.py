@@ -1,45 +1,39 @@
 import os
-import json
 import time
 import pandas as pd
 import pandas_ta as ta
 import telebot
-import requests
-import schedule
-import random
 import asyncio
 from threading import Thread
 from datetime import datetime
 from flask import Flask
 from deriv_api import DerivAPI
 
-# --- CONFIGURATION RENDER ---
+# --- CONFIGURATION ---
 DERIV_TOKEN = os.getenv("DERIV_TOKEN")
-TG_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TG_TOKEN = os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_TOKEN")
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-FINNHUB_KEY = os.getenv("FINNHUB_KEY")
 APP_ID = os.getenv("APP_ID", "1089")
 
-bot_tg = telebot.TeleBot(TG_TOKEN)
+# Initialisation Flask pour Render
 app = Flask(__name__)
+bot_tg = None
+
+if TG_TOKEN:
+    bot_tg = telebot.TeleBot(TG_TOKEN)
 
 class SniperSystem:
     def __init__(self):
-        self.session_active = True
-        self.symbols = ["frxXAUUSD", "BOOM1000", "BOOM500", "BOOM300", "CRASH1000", "CRASH500", "CRASH300"]
+        self.symbols = ["frxXAUUSD", "BOOM1000", "BOOM500", "CRASH1000", "CRASH500"]
         self.data_frames = {s: pd.DataFrame() for s in self.symbols}
-        self.ticks_processed = 0
-        self.sweeps_detected = 0
-        self.signals_sent = 0
         self.last_signal_time = {s: 0 for s in self.symbols}
 
     def is_market_open(self, symbol):
-        """Sécurité Week-end : L'Or ferme du Vendredi soir au Dimanche soir"""
+        """Gestion de la fermeture du Gold le week-end (UTC)"""
         if "XAU" in symbol:
             now = datetime.utcnow()
-            weekday = now.weekday()  # 4=Ven, 5=Sam, 6=Dim
-            hour = now.hour
-            if (weekday == 4 and hour >= 21) or weekday == 5 or (weekday == 6 and hour < 22):
+            weekday = now.weekday() 
+            if (weekday == 4 and now.hour >= 21) or weekday == 5 or (weekday == 6 and now.hour < 22):
                 return False
         return True
 
@@ -53,82 +47,52 @@ class SniperSystem:
         body_size = abs(last['close'] - last['open'])
         wick_percent = ((candle_range - body_size) / candle_range) if candle_range > 0 else 0
         
-        lookback = 50 if "XAU" in symbol else 30
-        low_zone = df['low'].iloc[-lookback:-1].min()
-        high_zone = df['high'].iloc[-lookback:-1].max()
+        low_zone = df['low'].iloc[-30:-1].min()
+        high_zone = df['high'].iloc[-30:-1].max()
 
-        # SIGNAL ACHAT (BUY)
         if last['low'] < low_zone and wick_percent > 0.55 and rsi < 25:
-            self.sweeps_detected += 1
-            label = "🏆 GOLD BUY" if "XAU" in symbol else "🚀 SPIKE BUY"
-            return {"type": label, "entry": last['close'], "sl": last['low'] - (0.5 if "XAU" in symbol else 1.5)}
-
-        # SIGNAL VENTE (SELL)
+            return {"type": "BUY 🔵", "price": last['close']}
         if last['high'] > high_zone and wick_percent > 0.55 and rsi > 75:
-            self.sweeps_detected += 1
-            label = "🏆 GOLD SELL" if "XAU" in symbol else "📉 SPIKE SELL"
-            return {"type": label, "entry": last['close'], "sl": last['high'] + (0.5 if "XAU" in symbol else 1.5)}
-        
+            return {"type": "SELL 🔴", "price": last['close']}
         return None
 
 system = SniperSystem()
-
-def send_signal(symbol, setup):
-    name = "GOLD (XAU/USD)" if "XAU" in symbol else symbol
-    msg = (f"🎯 **SIGNAL SNIPER SMC**\n\n"
-           f"🔥 **ORDRE : {setup['type']}**\n"
-           f"📈 Actif : `{name}`\n"
-           f"📍 ENTRÉE : `{setup['entry']:.2f}`\n"
-           f"🛡️ STOP LOSS : `{setup['sl']:.2f}`\n\n"
-           f"✅ *Confirmation : Sniper Rejection validé*")
-    bot_tg.send_message(TG_CHAT_ID, msg, parse_mode="Markdown")
-    system.signals_sent += 1
 
 async def deriv_worker():
     api = DerivAPI(app_id=APP_ID)
     await api.authorize(DERIV_TOKEN)
     
     async def subscribe(symbol):
-        while True: # Boucle de reconnexion automatique
+        while True:
             try:
                 if not system.is_market_open(symbol):
-                    await asyncio.sleep(3600) # Attend 1h si le marché est fermé
+                    await asyncio.sleep(3600)
                     continue
-
-                hist = await api.ticks_history({'ticks_history': symbol, 'count': 150, 'style': 'candles', 'granularity': 60})
-                system.data_frames[symbol] = pd.DataFrame(hist['candles'])
-                sub = await api.subscribe({'ohlc': symbol, 'granularity': 60})
                 
+                sub = await api.subscribe({'ohlc': symbol, 'granularity': 60})
                 async for msg in sub:
                     o = msg['ohlc']
-                    system.ticks_processed += 1
-                    new_c = {'epoch': o['open_time'], 'open': float(o['open']), 'high': float(o['high']), 'low': float(o['low']), 'close': float(o['close'])}
+                    new_c = {'epoch': o['open_time'], 'close': float(o['close']), 'high': float(o['high']), 'low': float(o['low']), 'open': float(o['open'])}
                     
                     df = system.data_frames[symbol]
-                    if not df.empty and new_c['epoch'] == df.iloc[-1]['epoch']:
-                        df.iloc[-1] = new_c
-                    else:
-                        df = pd.concat([df, pd.DataFrame([new_c])], ignore_index=True)
+                    system.data_frames[symbol] = pd.concat([df, pd.DataFrame([new_c])], ignore_index=True).tail(100)
                     
-                    system.data_frames[symbol] = df.tail(150)
                     setup = system.analyze_smc(system.data_frames[symbol], symbol)
-                    
-                    if setup:
-                        now = time.time()
-                        if now - system.last_signal_time[symbol] > 300: # Cooldown 5 min
-                            send_signal(symbol, setup)
-                            system.last_signal_time[symbol] = now
+                    if setup and (time.time() - system.last_signal_time[symbol] > 300):
+                        msg_text = f"🎯 **VVIP SIGNAL: {symbol}**\n🔥 Ordre: {setup['type']}\n📍 Prix: {setup['price']}"
+                        if bot_tg:
+                            bot_tg.send_message(TG_CHAT_ID, msg_text, parse_mode="Markdown")
+                        system.last_signal_time[symbol] = time.time()
             except:
-                await asyncio.sleep(10) # Reconnexion après 10 secondes en cas d'erreur
+                await asyncio.sleep(10)
 
     await asyncio.gather(*(subscribe(s) for s in system.symbols))
 
 @app.route('/')
-def health(): return "VVIP TERMINAL ONLINE", 200
+def health():
+    return "Mc ANTHONIO VVIP TERMINAL ONLINE", 200
 
 if __name__ == "__main__":
-    try:
-        bot_tg.send_message(TG_CHAT_ID, "🚀 **VVIP TERMINAL SNIPER DÉPLOYÉ**\n*(Gold + Synthétiques)*")
-    except: pass
-    Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000))), daemon=True).start()
-    asyncio.run(deriv_worker())
+    # Ce bloc n'est utilisé qu'en local, Render utilise Gunicorn
+    Thread(target=lambda: asyncio.run(deriv_worker()), daemon=True).start()
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
